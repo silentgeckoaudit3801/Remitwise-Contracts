@@ -268,6 +268,88 @@ mod testsuit {
         assert_eq!(unpaid.items.len(), 2);
     }
 
+
+    #[test]
+    fn test_get_bills_due_between_filters_boundaries_and_paginates() {
+        let env = Env::default();
+        set_ledger_time(&env, 1, 1_000);
+        let contract_id = env.register_contract(None, BillPayments);
+        let client = BillPaymentsClient::new(&env, &contract_id);
+        let owner = <soroban_sdk::Address as AddressTrait>::generate(&env);
+
+        for (name, due) in [
+            ("Before", 1_099u64),
+            ("Start", 1_100u64),
+            ("Middle", 1_200u64),
+            ("End", 1_300u64),
+            ("After", 1_301u64),
+        ] {
+            env.mock_all_auths();
+            client.create_bill(
+                &owner,
+                &String::from_str(&env, name),
+                &100,
+                &due,
+                &false,
+                &0,
+                &None,
+                &String::from_str(&env, "XLM"),
+                &None,
+            );
+        }
+
+        env.mock_all_auths();
+        client.pay_bill(&owner, &3);
+
+        let first = client
+            .try_get_bills_due_between(&owner, &1_100, &1_300, &0, &1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.count, 1);
+        assert_eq!(first.items.get(0).unwrap().id, 2);
+        assert_eq!(first.next_cursor, 2);
+
+        let second = client
+            .try_get_bills_due_between(&owner, &1_100, &1_300, &first.next_cursor, &10)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.count, 1);
+        assert_eq!(second.items.get(0).unwrap().id, 4);
+        assert_eq!(second.next_cursor, 0);
+    }
+
+    #[test]
+    fn test_get_bills_due_between_accepts_single_timestamp_and_rejects_inverted_range() {
+        let env = Env::default();
+        set_ledger_time(&env, 1, 1_000);
+        let contract_id = env.register_contract(None, BillPayments);
+        let client = BillPaymentsClient::new(&env, &contract_id);
+        let owner = <soroban_sdk::Address as AddressTrait>::generate(&env);
+
+        env.mock_all_auths();
+        client.create_bill(
+            &owner,
+            &String::from_str(&env, "Same day"),
+            &100,
+            &1_500,
+            &false,
+            &0,
+            &None,
+            &String::from_str(&env, "XLM"),
+            &None,
+        );
+
+        let page = client
+            .try_get_bills_due_between(&owner, &1_500, &1_500, &0, &10)
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.count, 1);
+        assert_eq!(page.items.get(0).unwrap().due_date, 1_500);
+
+        let result = client.try_get_bills_due_between(&owner, &1_501, &1_500, &0, &10);
+        assert_eq!(result, Err(Ok(Error::InvalidDueDate)));
+    }
+
     #[test]
     fn test_get_total_unpaid() {
         let env = Env::default();
