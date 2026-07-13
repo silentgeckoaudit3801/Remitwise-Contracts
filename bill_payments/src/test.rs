@@ -835,6 +835,20 @@ mod testsuit {
             &None,
         );
         assert_eq!(res3, Err(Ok(Error::InvalidDueDate)));
+
+        // due_date one second after now is also accepted
+        let res4 = client.try_create_bill(
+            &owner,
+            &String::from_str(&env, "AfterNow"),
+            &100,
+            &1_000_001u64,
+            &false,
+            &0u32,
+            &None,
+            &String::from_str(&env, "XLM"),
+            &None,
+        );
+        assert!(res4.is_ok());
     }
 
     #[test]
@@ -868,6 +882,56 @@ mod testsuit {
         // The next generated recurring bill (id 2) must have due_date > current time
         let next_bill = client.get_bill(&2).unwrap();
         assert!(next_bill.due_date > 2_000_000);
+    }
+
+    #[test]
+    fn test_recurring_generation_advances_to_first_future_period_and_clones_metadata() {
+        let env = Env::default();
+        set_ledger_time(&env, 1, 1_000_000);
+        let contract_id = env.register_contract(None, BillPayments);
+        let client = BillPaymentsClient::new(&env, &contract_id);
+        let owner = <soroban_sdk::Address as AddressTrait>::generate(&env);
+
+        env.mock_all_auths();
+        let name = String::from_str(&env, "Quarterly Hosting");
+        let amount = 7_500i128;
+        let due_date = 1_000_010u64;
+        let frequency_days = 10u32;
+        let bill_id = client.create_bill(
+            &owner,
+            &name,
+            &amount,
+            &due_date,
+            &true,
+            &frequency_days,
+            &None,
+            &String::from_str(&env, "USDC"),
+            &None,
+        );
+
+        let mut tags = Vec::new(&env);
+        tags.push_back(String::from_str(&env, "hosting"));
+        tags.push_back(String::from_str(&env, "ops"));
+        env.mock_all_auths();
+        client.add_tags_to_bill(&owner, &bill_id, &tags);
+
+        let parent_before_pay = client.get_bill(&bill_id).unwrap();
+        set_ledger_time(&env, 2, 3_100_000);
+        env.mock_all_auths();
+        client.pay_bill(&owner, &bill_id);
+
+        let next_bill = client.get_bill(&2).unwrap();
+        let expected_due_date = due_date + (frequency_days as u64 * 86_400 * 3);
+        assert_eq!(next_bill.due_date, expected_due_date);
+        assert!(next_bill.due_date > 3_100_000);
+        assert_eq!(next_bill.owner, parent_before_pay.owner);
+        assert_eq!(next_bill.name, parent_before_pay.name);
+        assert_eq!(next_bill.amount, parent_before_pay.amount);
+        assert_eq!(next_bill.currency, parent_before_pay.currency);
+        assert_eq!(next_bill.recurring, parent_before_pay.recurring);
+        assert_eq!(next_bill.frequency_days, parent_before_pay.frequency_days);
+        assert_eq!(next_bill.tags, parent_before_pay.tags);
+        assert!(!next_bill.paid);
     }
 
     #[test]
