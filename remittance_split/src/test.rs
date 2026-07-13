@@ -2028,6 +2028,78 @@ fn test_get_schedules_paginated_full_scale_cursor_monotonicity() {
     assert_eq!(beyond_end.next_cursor, 0);
 }
 
+/// get_remittance_schedules_paginated is the canonical schedule-ID cursor API:
+/// cursor is an exclusive lower bound on schedule ID and next_cursor is None on
+/// the final page, not an index into the owner schedule vector.
+#[test]
+fn test_get_remittance_schedules_paginated_uses_schedule_id_cursor() {
+    let env = Env::default();
+    let harness = setup_split(&env, 50, 30, 15, 5);
+    let client = &harness.client;
+    let owner = &harness.owner;
+
+    let amount = 1_000i128;
+    let next_due = env.ledger().timestamp() + 86_400;
+    let interval = MIN_SCHEDULE_INTERVAL;
+
+    for i in 0..5u32 {
+        let id =
+            client.create_remittance_schedule(owner, &amount, &(next_due + i as u64), &interval);
+        assert_eq!(id, i + 1);
+    }
+
+    let page1 = client.get_remittance_schedules_paginated(owner, &0, &2);
+    assert_eq!(page1.count, 2);
+    assert_eq!(page1.items.get(0).unwrap().id, 1);
+    assert_eq!(page1.items.get(1).unwrap().id, 2);
+    assert_eq!(page1.next_cursor, Some(2));
+
+    let page2 = client.get_remittance_schedules_paginated(owner, &2, &2);
+    assert_eq!(page2.count, 2);
+    assert_eq!(page2.items.get(0).unwrap().id, 3);
+    assert_eq!(page2.items.get(1).unwrap().id, 4);
+    assert_eq!(page2.next_cursor, Some(4));
+
+    let page3 = client.get_remittance_schedules_paginated(owner, &4, &2);
+    assert_eq!(page3.count, 1);
+    assert_eq!(page3.items.get(0).unwrap().id, 5);
+    assert_eq!(page3.next_cursor, None);
+}
+
+/// The schedule-ID cursor API must stay scoped to one owner and return an
+/// empty terminal page when the cursor is beyond that owner's largest ID.
+#[test]
+fn test_get_remittance_schedules_paginated_owner_isolation_and_tail() {
+    let env = Env::default();
+    let harness = setup_split(&env, 50, 30, 15, 5);
+    let client = &harness.client;
+    let owner = &harness.owner;
+    let other_owner = Address::generate(&env);
+
+    let amount = 1_000i128;
+    let next_due = env.ledger().timestamp() + 86_400;
+    let interval = MIN_SCHEDULE_INTERVAL;
+
+    let owner_id = client.create_remittance_schedule(owner, &amount, &next_due, &interval);
+    let other_id =
+        client.create_remittance_schedule(&other_owner, &amount, &(next_due + 1), &interval);
+
+    let owner_page = client.get_remittance_schedules_paginated(owner, &0, &10);
+    assert_eq!(owner_page.count, 1);
+    assert_eq!(owner_page.items.get(0).unwrap().id, owner_id);
+    assert_eq!(owner_page.next_cursor, None);
+
+    let other_page = client.get_remittance_schedules_paginated(&other_owner, &0, &10);
+    assert_eq!(other_page.count, 1);
+    assert_eq!(other_page.items.get(0).unwrap().id, other_id);
+    assert_eq!(other_page.next_cursor, None);
+
+    let beyond_tail = client.get_remittance_schedules_paginated(owner, &owner_id, &10);
+    assert_eq!(beyond_tail.count, 0);
+    assert_eq!(beyond_tail.items.len(), 0);
+    assert_eq!(beyond_tail.next_cursor, None);
+}
+
 // ============================================================================
 // get_split_allocations shape invariant tests
 //
