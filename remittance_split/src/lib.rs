@@ -258,6 +258,20 @@ pub struct SchedulePage {
     pub count: u32,
 }
 
+/// Canonical cursor page for remittance schedule reads.
+///
+/// `cursor` is the last schedule ID seen by the caller. Passing `0` starts
+/// from the first schedule, and `next_cursor = None` marks the final page.
+#[contracttype]
+#[derive(Clone)]
+pub struct RemittanceSchedulePage {
+    pub items: Vec<RemittanceSchedule>,
+    /// Last returned schedule ID to pass as the next exclusive cursor.
+    pub next_cursor: Option<u32>,
+    /// Number of items returned in this page.
+    pub count: u32,
+}
+
 /// Split allocation output item for UI/analytics consumers.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -2887,6 +2901,64 @@ impl RemittanceSplit {
         let next_cursor = if end < len { end } else { 0 };
 
         SchedulePage {
+            items,
+            next_cursor,
+            count,
+        }
+    }
+
+    /// Get remittance schedules for `owner` using schedule-ID cursor semantics.
+    ///
+    /// This is the canonical schedule-list entrypoint for integrators. It walks
+    /// `DataKey::OwnerSchedules(owner)` in ascending schedule-ID order. `cursor`
+    /// is an exclusive lower bound on schedule ID: pass `0` for the first page,
+    /// then pass the returned `next_cursor` value until it is `None`.
+    ///
+    /// The legacy `get_schedules_paginated` and `get_remittance_schedules_page`
+    /// entrypoints remain available for backwards compatibility, but they use
+    /// zero-based index cursors instead of schedule-ID cursors.
+    pub fn get_remittance_schedules_paginated(
+        env: Env,
+        owner: Address,
+        cursor: u32,
+        limit: u32,
+    ) -> RemittanceSchedulePage {
+        let index_key = DataKey::OwnerSchedules(owner.clone());
+        let Some(schedule_ids) = env.storage().persistent().get::<_, Vec<u32>>(&index_key) else {
+            return RemittanceSchedulePage {
+                items: Vec::new(&env),
+                next_cursor: None,
+                count: 0,
+            };
+        };
+
+        let cap = clamp_limit(limit);
+        let mut items = Vec::new(&env);
+        let mut has_more = false;
+
+        for id in schedule_ids.iter() {
+            if id <= cursor {
+                continue;
+            }
+            if items.len() >= cap {
+                has_more = true;
+                break;
+            }
+
+            let sch_key = DataKey::Schedule(id);
+            if let Some(schedule) = env.storage().persistent().get(&sch_key) {
+                items.push_back(schedule);
+            }
+        }
+
+        let count = items.len();
+        let next_cursor = if has_more && count > 0 {
+            items.get(count - 1).map(|schedule| schedule.id)
+        } else {
+            None
+        };
+
+        RemittanceSchedulePage {
             items,
             next_cursor,
             count,
