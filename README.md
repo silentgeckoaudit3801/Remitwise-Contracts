@@ -320,6 +320,7 @@ To run an example, use `cargo run --example <example_name>`:
 
 - [Changelog](CHANGELOG.md) - Conventional-commits-style log of every release
 - [Authorization Matrix](docs/AUTHORIZATION_MATRIX.md) - Per-entrypoint caller authorization requirements for all contracts
+- [Settler Whitelist Operator Guide](docs/SETTLER_WHITELIST.md) - How to add, rotate, revoke, and verify authorized settlement operators
 - [Family Wallet Design (as implemented)](docs/family-wallet-design.md)
 - [Reporting Admin Rotation](docs/reporting-admin-rotation.md) - Two-step upgrade-admin handoff procedure for reporting dependency configuration
 - [Event Indexing Guide](docs/INDEXING.md) - Mapping contract events to off-chain tables
