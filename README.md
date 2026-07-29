@@ -96,6 +96,19 @@ Running the Compatibility Coverage
 
 cargo test -p remitwise-common
 
+Focused test recipe
+
+Use the repository `justfile` to run one focused Cargo test by substring while
+keeping the same workspace dependency resolution as the full suite:
+
+```bash
+just test-one emit_audit
+```
+
+The recipe expands to `cargo test --workspace <pattern>`. It rejects an empty
+pattern before Cargo starts and prints `usage: just test-one <pattern>`, so it
+is safe to re-run while narrowing a failing test.
+
 Security Notes
 
 - Enums use "#[repr(u32)]" and are asserted in tests, reducing the risk of contract integration drift.
